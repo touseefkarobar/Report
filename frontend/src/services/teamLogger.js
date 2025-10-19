@@ -114,6 +114,68 @@ const normaliseSuppressionFlag = (flag) => {
   return false;
 };
 
+const toMillisecondsFromHours = (hours) => {
+  if (!Number.isFinite(hours)) return null;
+  return hours * 60 * 60 * 1000;
+};
+
+const toMillisecondsFromSeconds = (seconds) => {
+  if (!Number.isFinite(seconds)) return null;
+  return seconds * 1000;
+};
+
+const extractEmployeeReportStats = (payload) => {
+  const report = payload?.employeeTimeReport;
+  if (!report || !Array.isArray(report.timeReportItems) || report.timeReportItems.length === 0) {
+    return { report: report ?? null, item: null, stats: null };
+  }
+
+  const item = report.timeReportItems.find((entry) => entry && typeof entry === 'object') ?? null;
+  if (!item) {
+    return { report, item: null, stats: null };
+  }
+
+  const {
+    title,
+    email,
+    totalHours,
+    activeMinutesRatio,
+    activeSecondsRatio,
+    totalSecondsCount,
+    activeSecondsCount,
+    inactiveSecondsCount,
+    breakHours,
+    spanHours,
+    onComputerHours,
+    meetingHours,
+    idleHours,
+    las,
+  } = item;
+
+  const sanitiseNumber = (value) => (Number.isFinite(value) ? value : null);
+
+  return {
+    report,
+    item,
+    stats: {
+      title: title ?? null,
+      email: email ?? null,
+      totalHours: sanitiseNumber(totalHours),
+      activeMinutesRatio: sanitiseNumber(activeMinutesRatio),
+      activeSecondsRatio: sanitiseNumber(activeSecondsRatio),
+      totalSecondsCount: sanitiseNumber(totalSecondsCount),
+      activeSecondsCount: sanitiseNumber(activeSecondsCount),
+      inactiveSecondsCount: sanitiseNumber(inactiveSecondsCount),
+      breakHours: sanitiseNumber(breakHours),
+      spanHours: sanitiseNumber(spanHours),
+      onComputerHours: sanitiseNumber(onComputerHours),
+      meetingHours: sanitiseNumber(meetingHours),
+      idleHours: sanitiseNumber(idleHours),
+      las: las ?? null,
+    },
+  };
+};
+
 export async function fetchTeamLoggerTotalTime({
   token,
   companyId,
@@ -157,12 +219,26 @@ export async function fetchTeamLoggerTotalTime({
 
   const payload = await response.json();
 
-  const totalWorkedMilliseconds = findBestDurationCandidate(payload);
+  const { report, item, stats } = extractEmployeeReportStats(payload);
+  const candidateDurations = [
+    toMillisecondsFromHours(stats?.totalHours ?? null),
+    toMillisecondsFromHours(stats?.onComputerHours ?? null),
+    toMillisecondsFromHours(stats?.spanHours ?? null),
+    toMillisecondsFromSeconds(stats?.totalSecondsCount ?? null),
+    toMillisecondsFromSeconds(stats?.activeSecondsCount ?? null),
+    findBestDurationCandidate(payload),
+  ].filter((value) => typeof value === 'number' && value >= 0);
+
+  const totalWorkedMilliseconds =
+    candidateDurations.length > 0 ? Math.max(...candidateDurations) : 0;
 
   return {
     raw: payload,
     totalWorkedMilliseconds,
     totalWorkedHours: totalWorkedMilliseconds / (60 * 60 * 1000),
+    employeeTimeReport: report,
+    employeeTimeReportItem: item,
+    stats,
   };
 }
 
