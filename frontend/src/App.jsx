@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import dayjs from 'dayjs';
 
+import { fetchTeamLoggerTotalTime, formatDuration } from './services/teamLogger';
+
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const StatTile = ({ label, value, accent }) => (
@@ -80,6 +82,19 @@ function App() {
   const [holidayInput, setHolidayInput] = useState('');
   const [holidays, setHolidays] = useState([]);
   const [loggedHours, setLoggedHours] = useState('');
+  const [teamLoggerConfig, setTeamLoggerConfig] = useState({
+    token: '',
+    companyId: '5a676d1389f44c23ac4a0208e0b39ada',
+    accountId: '58d2c798c6264f4e9e1fe88de4bddeaf',
+    startTime: '1759258800000',
+    endTime: '1761937199000',
+    dayStartCutOff: '0',
+    dayEndCutOff: '-1',
+    suppressDetails: 'false',
+  });
+  const [teamLoggerLoading, setTeamLoggerLoading] = useState(false);
+  const [teamLoggerError, setTeamLoggerError] = useState('');
+  const [teamLoggerTotals, setTeamLoggerTotals] = useState(null);
 
   const { totalWorkingDays, workingDaysToDate, totalTargetHours, expectedHoursByToday } = useWorkingCalendar({
     weekendDays,
@@ -110,6 +125,38 @@ function App() {
 
   const handleRemoveHoliday = (date) => {
     setHolidays((prev) => prev.filter((item) => item !== date));
+  };
+
+  const handleTeamLoggerConfigChange = (event) => {
+    const { name, value } = event.target;
+    setTeamLoggerConfig((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleFetchTeamLogger = async () => {
+    setTeamLoggerLoading(true);
+    setTeamLoggerError('');
+    try {
+      const { token, suppressDetails, ...rest } = teamLoggerConfig;
+      const result = await fetchTeamLoggerTotalTime({
+        token: token.trim(),
+        companyId: rest.companyId.trim(),
+        accountId: rest.accountId.trim(),
+        startTime: rest.startTime ? Number(rest.startTime) : undefined,
+        endTime: rest.endTime ? Number(rest.endTime) : undefined,
+        dayStartCutOff: rest.dayStartCutOff !== '' ? Number(rest.dayStartCutOff) : undefined,
+        dayEndCutOff: rest.dayEndCutOff !== '' ? Number(rest.dayEndCutOff) : undefined,
+        suppressDetails,
+      });
+      setTeamLoggerTotals(result);
+    } catch (error) {
+      setTeamLoggerTotals(null);
+      setTeamLoggerError(error.message);
+    } finally {
+      setTeamLoggerLoading(false);
+    }
   };
 
   return (
@@ -252,6 +299,163 @@ function App() {
                 </p>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="grid gap-8 lg:grid-cols-[3fr,2fr]">
+          <div className="space-y-6 rounded-3xl border border-slate-800 bg-slate-950/60 p-8 shadow-elevated">
+            <div>
+              <h2 className="text-xl font-semibold text-white">TeamLogger report lookup</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Paste your bearer token and request window to pull the total tracked time directly from TeamLogger.
+              </p>
+            </div>
+
+            <div className="grid gap-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-medium text-slate-400">Bearer token</span>
+                <textarea
+                  name="token"
+                  value={teamLoggerConfig.token}
+                  onChange={handleTeamLoggerConfigChange}
+                  rows={3}
+                  placeholder="eyJ0eXAiOiJKV1QiLCJhbGciOiJI..."
+                  className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                />
+              </label>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-slate-400">Company ID</span>
+                  <input
+                    name="companyId"
+                    value={teamLoggerConfig.companyId}
+                    onChange={handleTeamLoggerConfigChange}
+                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-slate-400">Account ID</span>
+                  <input
+                    name="accountId"
+                    value={teamLoggerConfig.accountId}
+                    onChange={handleTeamLoggerConfigChange}
+                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-slate-400">Start time (epoch ms)</span>
+                  <input
+                    name="startTime"
+                    value={teamLoggerConfig.startTime}
+                    onChange={handleTeamLoggerConfigChange}
+                    inputMode="numeric"
+                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-slate-400">End time (epoch ms)</span>
+                  <input
+                    name="endTime"
+                    value={teamLoggerConfig.endTime}
+                    onChange={handleTeamLoggerConfigChange}
+                    inputMode="numeric"
+                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-slate-400">Day start cut-off</span>
+                  <input
+                    name="dayStartCutOff"
+                    value={teamLoggerConfig.dayStartCutOff}
+                    onChange={handleTeamLoggerConfigChange}
+                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-slate-400">Day end cut-off</span>
+                  <input
+                    name="dayEndCutOff"
+                    value={teamLoggerConfig.dayEndCutOff}
+                    onChange={handleTeamLoggerConfigChange}
+                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm font-medium text-slate-400">Suppress details</span>
+                  <select
+                    name="suppressDetails"
+                    value={teamLoggerConfig.suppressDetails}
+                    onChange={handleTeamLoggerConfigChange}
+                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                  >
+                    <option value="false">False</option>
+                    <option value="true">True</option>
+                  </select>
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleFetchTeamLogger}
+                disabled={teamLoggerLoading || !teamLoggerConfig.token.trim()}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-600/40 transition hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:shadow-none"
+              >
+                {teamLoggerLoading ? 'Fetching report…' : 'Fetch total time worked'}
+              </button>
+
+              {teamLoggerError && (
+                <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {teamLoggerError}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-3xl border border-slate-800 bg-slate-950/60 p-8 shadow-elevated">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Total time worked</h3>
+              <p className="mt-1 text-sm text-slate-400">
+                Results are parsed automatically from any matching <code>totalWorked*</code> or tracked duration fields in the API response.
+              </p>
+            </div>
+
+            {teamLoggerTotals ? (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+                  <p className="text-sm uppercase tracking-wide text-slate-400">Tracked duration</p>
+                  <p className="mt-3 text-4xl font-semibold text-white">
+                    {formatDuration(teamLoggerTotals.totalWorkedMilliseconds)}
+                  </p>
+                  <p className="mt-2 text-sm text-slate-400">
+                    ≈ {formatNumber(teamLoggerTotals.totalWorkedHours)} hours in total.
+                  </p>
+                </div>
+
+                <details className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-300">
+                  <summary className="cursor-pointer font-medium text-slate-200">View raw response</summary>
+                  <pre className="mt-3 max-h-72 overflow-auto rounded-2xl bg-slate-950/70 p-4 text-xs text-slate-300">
+                    {JSON.stringify(teamLoggerTotals.raw, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400">
+                {teamLoggerLoading
+                  ? 'Requesting fresh data from TeamLogger…'
+                  : 'Fetch a report to display the total time worked summary here.'}
+              </div>
+            )}
           </div>
         </section>
       </main>
