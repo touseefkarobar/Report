@@ -1,5 +1,41 @@
 const DEFAULT_BASE_URL = 'https://api2.teamlogger.com/api';
 
+export async function authenticateTeamLogger({
+  username,
+  password,
+  grantType = 'password',
+  baseUrl = DEFAULT_BASE_URL,
+} = {}) {
+  if (!username || !password) {
+    throw new Error('Both username and password are required.');
+  }
+
+  const response = await fetch(`${baseUrl}/Token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      username,
+      password,
+      grantType,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Authentication failed with ${response.status} ${response.statusText}. ${body}`);
+  }
+
+  const payload = await response.json();
+
+  if (!payload?.accessToken) {
+    throw new Error('Authentication response did not include an access token.');
+  }
+
+  return payload;
+}
+
 const DURATION_KEY_PATTERNS = [
   { regex: /total.*(work|track).*(millisecond|ms)/i, unit: 'ms' },
   { regex: /total.*(work|track).*(second|sec)/i, unit: 's' },
@@ -178,6 +214,7 @@ const extractEmployeeReportStats = (payload) => {
 
 export async function fetchTeamLoggerTotalTime({
   token,
+  tokenType = 'Bearer',
   companyId,
   accountId,
   startTime,
@@ -206,7 +243,7 @@ export async function fetchTeamLoggerTotalTime({
 
   const response = await fetch(url.toString(), {
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `${tokenType} ${token}`,
     },
   });
 

@@ -1,7 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
 
-import { fetchTeamLoggerTotalTime, formatDuration } from './services/teamLogger';
+import {
+  authenticateTeamLogger,
+  fetchTeamLoggerTotalTime,
+  formatDuration,
+} from './services/teamLogger';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -44,6 +48,16 @@ const HolidayBadge = ({ date, onRemove }) => (
 const formatNumber = (value) =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(value);
 
+const TEAMLOGGER_DEFAULT_FILTERS = {
+  startTime: 1759258800000,
+  endTime: 1761937199000,
+  dayStartCutOff: 0,
+  dayEndCutOff: -1,
+  suppressDetails: false,
+};
+
+const TEAMLOGGER_STORAGE_KEY = 'teamLoggerAuth';
+
 function useWorkingCalendar({ weekendDays, holidays, dailyTargetHours }) {
   return useMemo(() => {
     const today = dayjs();
@@ -82,25 +96,57 @@ function App() {
   const [holidayInput, setHolidayInput] = useState('');
   const [holidays, setHolidays] = useState([]);
   const [loggedHours, setLoggedHours] = useState('');
-  const [teamLoggerConfig, setTeamLoggerConfig] = useState({
-    token: '',
-    companyId: '5a676d1389f44c23ac4a0208e0b39ada',
-    accountId: '58d2c798c6264f4e9e1fe88de4bddeaf',
-    startTime: '1759258800000',
-    endTime: '1761937199000',
-    dayStartCutOff: '0',
-    dayEndCutOff: '-1',
-    suppressDetails: 'false',
+  const [auth, setAuth] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = window.localStorage.getItem(TEAMLOGGER_STORAGE_KEY);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed?.accessToken) {
+            return {
+              accessToken: parsed.accessToken,
+              tokenType: parsed.tokenType ?? 'Bearer',
+              account: parsed.account ?? null,
+            };
+          }
+        } catch {
+          window.localStorage.removeItem(TEAMLOGGER_STORAGE_KEY);
+        }
+      }
+    }
+
+    return { accessToken: '', tokenType: 'Bearer', account: null };
   });
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const [teamLoggerLoading, setTeamLoggerLoading] = useState(false);
   const [teamLoggerError, setTeamLoggerError] = useState('');
   const [teamLoggerTotals, setTeamLoggerTotals] = useState(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
 
   const { totalWorkingDays, workingDaysToDate, totalTargetHours, expectedHoursByToday } = useWorkingCalendar({
     weekendDays,
     holidays,
     dailyTargetHours,
   });
+
+  const accountId = auth.account?.id ?? '';
+  const companyId = auth.account?.companyId ?? '';
+  const accountName = auth.account?.name || auth.account?.username || '';
+  const companyName = auth.account?.company?.name || '';
+  const token = auth.accessToken;
+  const tokenType = auth.tokenType ?? 'Bearer';
+  const isAuthenticated = Boolean(token && accountId && companyId);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (auth.accessToken) {
+      window.localStorage.setItem(TEAMLOGGER_STORAGE_KEY, JSON.stringify(auth));
+    } else {
+      window.localStorage.removeItem(TEAMLOGGER_STORAGE_KEY);
+    }
+  }, [auth]);
 
   const parsedLoggedHours = parseFloat(loggedHours) || 0;
   const hourDelta = parsedLoggedHours - expectedHoursByToday;
@@ -137,37 +183,163 @@ function App() {
     setHolidays((prev) => prev.filter((item) => item !== date));
   };
 
-  const handleTeamLoggerConfigChange = (event) => {
+  const handleLoginFieldChange = (event) => {
     const { name, value } = event.target;
-    setTeamLoggerConfig((prev) => ({
+    setLoginForm((prev) => ({
       ...prev,
       [name]: value,
     }));
   };
 
-  const handleFetchTeamLogger = async () => {
-    setTeamLoggerLoading(true);
-    setTeamLoggerError('');
+  const handleLoginSubmit = async (event) => {
+    event.preventDefault();
+    const username = loginForm.username.trim();
+    const password = loginForm.password;
+
+    if (!username || !password) {
+      setLoginError('Username and password are required.');
+      return;
+    }
+
+    setLoginLoading(true);
+    setLoginError('');
     try {
-      const { token, suppressDetails, ...rest } = teamLoggerConfig;
-      const result = await fetchTeamLoggerTotalTime({
-        token: token.trim(),
-        companyId: rest.companyId.trim(),
-        accountId: rest.accountId.trim(),
-        startTime: rest.startTime ? Number(rest.startTime) : undefined,
-        endTime: rest.endTime ? Number(rest.endTime) : undefined,
-        dayStartCutOff: rest.dayStartCutOff !== '' ? Number(rest.dayStartCutOff) : undefined,
-        dayEndCutOff: rest.dayEndCutOff !== '' ? Number(rest.dayEndCutOff) : undefined,
-        suppressDetails,
+      const payload = await authenticateTeamLogger({ username, password });
+      setAuth({
+        accessToken: payload.accessToken,
+        tokenType: payload.tokenType ?? 'Bearer',
+        account: payload.account ?? null,
       });
-      setTeamLoggerTotals(result);
+      setLoginForm({ username: '', password: '' });
     } catch (error) {
-      setTeamLoggerTotals(null);
-      setTeamLoggerError(error.message);
+      setLoginError(error.message);
     } finally {
-      setTeamLoggerLoading(false);
+      setLoginLoading(false);
     }
   };
+
+  const handleSignOut = () => {
+    setAuth({ accessToken: '', tokenType: 'Bearer', account: null });
+    setTeamLoggerTotals(null);
+    setTeamLoggerError('');
+    setTeamLoggerLoading(false);
+    setLoggedHours('');
+    setLastSyncedAt(null);
+    setLoginForm({ username: '', password: '' });
+    setLoginError('');
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    let ignore = false;
+
+    const fetchReport = async () => {
+      setTeamLoggerLoading(true);
+      setTeamLoggerError('');
+      try {
+        const result = await fetchTeamLoggerTotalTime({
+          token,
+          tokenType,
+          companyId,
+          accountId,
+          startTime: TEAMLOGGER_DEFAULT_FILTERS.startTime,
+          endTime: TEAMLOGGER_DEFAULT_FILTERS.endTime,
+          dayStartCutOff: TEAMLOGGER_DEFAULT_FILTERS.dayStartCutOff,
+          dayEndCutOff: TEAMLOGGER_DEFAULT_FILTERS.dayEndCutOff,
+          suppressDetails: TEAMLOGGER_DEFAULT_FILTERS.suppressDetails,
+        });
+
+        if (ignore) return;
+
+        setTeamLoggerTotals(result);
+        setLastSyncedAt(Date.now());
+
+        const onComputerHours = result?.stats?.onComputerHours;
+        if (Number.isFinite(onComputerHours)) {
+          setLoggedHours((prev) => {
+            const next = String(onComputerHours);
+            return prev === next ? prev : next;
+          });
+        }
+      } catch (error) {
+        if (ignore) return;
+        setTeamLoggerTotals(null);
+        setTeamLoggerError(error.message);
+      } finally {
+        if (!ignore) {
+          setTeamLoggerLoading(false);
+        }
+      }
+    };
+
+    fetchReport();
+
+    return () => {
+      ignore = true;
+    };
+  }, [isAuthenticated, token, tokenType, companyId, accountId]);
+
+  if (!token) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+        <div className="flex min-h-screen items-center justify-center px-6 py-16">
+          <div className="w-full max-w-md space-y-6 rounded-3xl border border-slate-800 bg-slate-950/70 p-8 shadow-elevated">
+            <div className="text-center">
+              <p className="inline-flex items-center gap-2 rounded-full border border-primary-500/20 bg-primary-600/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-primary-200">
+                TeamLogger Sync
+              </p>
+              <h1 className="mt-4 text-3xl font-bold text-white">Sign in to continue</h1>
+              <p className="mt-2 text-sm text-slate-400">
+                Enter your TeamLogger credentials to securely retrieve your working hours and analytics.
+              </p>
+            </div>
+
+            <form className="space-y-4" onSubmit={handleLoginSubmit}>
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-medium text-slate-300">Username</span>
+                <input
+                  name="username"
+                  value={loginForm.username}
+                  onChange={handleLoginFieldChange}
+                  autoComplete="username"
+                  className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-medium text-slate-300">Password</span>
+                <input
+                  name="password"
+                  type="password"
+                  value={loginForm.password}
+                  onChange={handleLoginFieldChange}
+                  autoComplete="current-password"
+                  className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-base text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
+                />
+              </label>
+
+              {loginError && (
+                <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {loginError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-600/40 transition hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:shadow-none"
+              >
+                {loginLoading ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
@@ -272,21 +444,21 @@ function App() {
             <div>
               <h2 className="text-xl font-semibold text-white">Real-time effort tracking</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Enter your logged hours to instantly understand how far ahead or behind you are from the
-                expectations.
+                We automatically sync your on-computer hours from TeamLogger after you sign in. You can adjust the
+                value below if you need to run what-if scenarios.
               </p>
             </div>
 
             <div className="space-y-4">
               <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium text-slate-400">Logged hours this month</span>
+                <span className="text-sm font-medium text-slate-400">On-computer hours this month</span>
                 <input
                   type="number"
                   min="0"
                   step="0.25"
                   value={loggedHours}
                   onChange={(event) => setLoggedHours(event.target.value)}
-                  placeholder="e.g. 96"
+                  placeholder="Synced automatically from TeamLogger"
                   className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-lg text-white outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
                 />
               </div>
@@ -315,120 +487,55 @@ function App() {
         <section className="grid gap-8 lg:grid-cols-[3fr,2fr]">
           <div className="space-y-6 rounded-3xl border border-slate-800 bg-slate-950/60 p-8 shadow-elevated">
             <div>
-              <h2 className="text-xl font-semibold text-white">TeamLogger report lookup</h2>
+              <h2 className="text-xl font-semibold text-white">TeamLogger sync</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Paste your bearer token and request window to pull the total tracked time directly from TeamLogger.
+                Your working hours refresh automatically using the connected TeamLogger account.
               </p>
             </div>
 
-            <div className="grid gap-4">
-              <label className="flex flex-col gap-2">
-                <span className="text-sm font-medium text-slate-400">Bearer token</span>
-                <textarea
-                  name="token"
-                  value={teamLoggerConfig.token}
-                  onChange={handleTeamLoggerConfigChange}
-                  rows={3}
-                  placeholder="eyJ0eXAiOiJKV1QiLCJhbGciOiJI..."
-                  className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                />
-              </label>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-400">Company ID</span>
-                  <input
-                    name="companyId"
-                    value={teamLoggerConfig.companyId}
-                    onChange={handleTeamLoggerConfigChange}
-                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-400">Account ID</span>
-                  <input
-                    name="accountId"
-                    value={teamLoggerConfig.accountId}
-                    onChange={handleTeamLoggerConfigChange}
-                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                  />
-                </label>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+                <p className="text-sm uppercase tracking-wide text-slate-400">Connected account</p>
+                <p className="mt-3 text-2xl font-semibold text-white">{accountName || '—'}</p>
+                <dl className="mt-4 space-y-2 text-sm text-slate-300">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-400">Email</dt>
+                    <dd className="font-medium text-slate-200">{auth.account?.email ?? '—'}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-400">Company</dt>
+                    <dd className="font-medium text-slate-200">{companyName || '—'}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-400">Username</dt>
+                    <dd className="font-medium text-slate-200">{auth.account?.username ?? '—'}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-400">Last synced</dt>
+                    <dd className="font-medium text-slate-200">
+                      {teamLoggerLoading
+                        ? 'Syncing…'
+                        : lastSyncedAt
+                          ? dayjs(lastSyncedAt).format('DD MMM YYYY HH:mm')
+                          : 'Awaiting sync'}
+                    </dd>
+                  </div>
+                </dl>
               </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-400">Start time (epoch ms)</span>
-                  <input
-                    name="startTime"
-                    value={teamLoggerConfig.startTime}
-                    onChange={handleTeamLoggerConfigChange}
-                    inputMode="numeric"
-                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-400">End time (epoch ms)</span>
-                  <input
-                    name="endTime"
-                    value={teamLoggerConfig.endTime}
-                    onChange={handleTeamLoggerConfigChange}
-                    inputMode="numeric"
-                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                  />
-                </label>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3">
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-400">Day start cut-off</span>
-                  <input
-                    name="dayStartCutOff"
-                    value={teamLoggerConfig.dayStartCutOff}
-                    onChange={handleTeamLoggerConfigChange}
-                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-400">Day end cut-off</span>
-                  <input
-                    name="dayEndCutOff"
-                    value={teamLoggerConfig.dayEndCutOff}
-                    onChange={handleTeamLoggerConfigChange}
-                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-400">Suppress details</span>
-                  <select
-                    name="suppressDetails"
-                    value={teamLoggerConfig.suppressDetails}
-                    onChange={handleTeamLoggerConfigChange}
-                    className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/40"
-                  >
-                    <option value="false">False</option>
-                    <option value="true">True</option>
-                  </select>
-                </label>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleFetchTeamLogger}
-                disabled={teamLoggerLoading || !teamLoggerConfig.token.trim()}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-600/40 transition hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:shadow-none"
-              >
-                {teamLoggerLoading ? 'Fetching report…' : 'Fetch total time worked'}
-              </button>
 
               {teamLoggerError && (
                 <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                   {teamLoggerError}
                 </p>
               )}
+
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-700 px-6 py-3 text-sm font-semibold text-slate-200 transition hover:border-red-400/60 hover:text-red-200"
+              >
+                Sign out
+              </button>
             </div>
           </div>
 
@@ -550,8 +657,8 @@ function App() {
             ) : (
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400">
                 {teamLoggerLoading
-                  ? 'Requesting fresh data from TeamLogger…'
-                  : 'Fetch a report to display the total time worked summary here.'}
+                  ? 'Syncing your TeamLogger report…'
+                  : 'Your TeamLogger working hours will appear here after the automatic sync completes.'}
               </div>
             )}
           </div>
