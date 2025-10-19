@@ -107,6 +107,16 @@ function App() {
   const hoursStatusLabel = hourDelta >= 0 ? 'Advanced hours' : 'Remaining hours';
   const hoursStatusValue = Math.abs(hourDelta);
 
+  const teamLoggerStats = teamLoggerTotals?.stats;
+  const formatHoursValue = (hours) =>
+    Number.isFinite(hours) ? `${formatNumber(hours)} h` : '—';
+  const formatPercentageValue = (ratio) =>
+    Number.isFinite(ratio) ? `${formatNumber(ratio * 100)}%` : '—';
+  const formatSecondsValue = (seconds) =>
+    Number.isFinite(seconds) ? formatDuration(seconds * 1000) : '—';
+  const formatTimestamp = (value) =>
+    Number.isFinite(value) && value > 0 ? dayjs(value).format('DD MMM YYYY HH:mm') : '—';
+
   const handleToggleWeekend = (dayIndex) => {
     setWeekendDays((prev) =>
       prev.includes(dayIndex)
@@ -440,7 +450,95 @@ function App() {
                   <p className="mt-2 text-sm text-slate-400">
                     ≈ {formatNumber(teamLoggerTotals.totalWorkedHours)} hours in total.
                   </p>
+                  {teamLoggerStats?.title || teamLoggerStats?.email ? (
+                    <p className="mt-3 text-xs text-slate-500">
+                      {[teamLoggerStats?.title, teamLoggerStats?.email].filter(Boolean).join(' · ')}
+                    </p>
+                  ) : null}
                 </div>
+
+                {teamLoggerStats ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      <StatTile
+                        label="On computer hours"
+                        value={formatHoursValue(teamLoggerStats.onComputerHours)}
+                        accent="text-primary-200"
+                      />
+                      <StatTile
+                        label="Break hours"
+                        value={formatHoursValue(teamLoggerStats.breakHours)}
+                        accent="text-rose-200"
+                      />
+                      <StatTile
+                        label="Meeting hours"
+                        value={formatHoursValue(teamLoggerStats.meetingHours)}
+                        accent="text-sky-200"
+                      />
+                      <StatTile
+                        label="Idle hours"
+                        value={formatHoursValue(teamLoggerStats.idleHours)}
+                        accent="text-amber-200"
+                      />
+                      <StatTile
+                        label="Span hours"
+                        value={formatHoursValue(teamLoggerStats.spanHours)}
+                        accent="text-emerald-200"
+                      />
+                      <StatTile
+                        label="Active minutes ratio"
+                        value={formatPercentageValue(teamLoggerStats.activeMinutesRatio)}
+                        accent="text-indigo-200"
+                      />
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      <StatTile
+                        label="Active seconds ratio"
+                        value={formatPercentageValue(teamLoggerStats.activeSecondsRatio)}
+                        accent="text-purple-200"
+                      />
+                      <StatTile
+                        label="Active time"
+                        value={formatSecondsValue(teamLoggerStats.activeSecondsCount)}
+                        accent="text-emerald-200"
+                      />
+                      <StatTile
+                        label="Inactive time"
+                        value={formatSecondsValue(teamLoggerStats.inactiveSecondsCount)}
+                        accent="text-rose-200"
+                      />
+                    </div>
+
+                    {teamLoggerStats.las ? (
+                      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+                        <p className="text-sm uppercase tracking-wide text-slate-400">Latest activity snapshot</p>
+                        <dl className="mt-4 space-y-2 text-sm text-slate-300">
+                          <div className="flex justify-between gap-3">
+                            <dt className="text-slate-400">Timer status</dt>
+                            <dd className="font-medium text-slate-200">{teamLoggerStats.las.tStatus ?? '—'}</dd>
+                          </div>
+                          <div className="flex justify-between gap-3">
+                            <dt className="text-slate-400">User status</dt>
+                            <dd className="font-medium text-slate-200">{teamLoggerStats.las.uStatus ?? '—'}</dd>
+                          </div>
+                          <div className="flex justify-between gap-3">
+                            <dt className="text-slate-400">Idle time</dt>
+                            <dd className="font-medium text-slate-200">{formatSecondsValue(teamLoggerStats.las.idleSecs)}</dd>
+                          </div>
+                          <div className="flex justify-between gap-3">
+                            <dt className="text-slate-400">App version</dt>
+                            <dd className="font-medium text-slate-200">{teamLoggerStats.las.cVersion ?? '—'}</dd>
+                          </div>
+                          <div className="flex justify-between gap-3">
+                            <dt className="text-slate-400">Last sync</dt>
+                            <dd className="font-medium text-slate-200">{formatTimestamp(teamLoggerStats.las.ts)}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <details className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-300">
                   <summary className="cursor-pointer font-medium text-slate-200">View raw response</summary>
